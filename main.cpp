@@ -8,9 +8,11 @@ int main()
 	using namespace labCSVParser;
 	using namespace labTuple;
 	
-	CSVParser<int, int> parser("input.txt");
+	CSVParser<int, string, string> parser("input.txt");
 	for (auto it = parser.begin(); it != parser.end(); ++it)
 		cout << *it << endl;
+	//std::tuple<int, int, string> t;
+	//changeTuple(t);
 
 	return 0;
 }

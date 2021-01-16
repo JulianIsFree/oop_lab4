@@ -1,16 +1,36 @@
 #ifndef CSVPARSER_H
 #define CSVPARSER_H
 #include <fstream>
+#include <vector>
+#include <sstream>
+#include <string>
 #include <tuple>
+#include <locale>
+
 #include "Exception.h"
 #include "Tuple.h"
 
 namespace labCSVParser
-{	
+{
+	struct DelimsLocale : std::ctype<char>
+	{
+		DelimsLocale(std::string const &delims) : std::ctype<char>(get_table(delims)) {}
+
+		static std::ctype_base::mask const* get_table(std::string const &delims)
+		{
+			static std::vector<std::ctype_base::mask> delimiters(table_size, std::ctype_base::mask());
+			for (unsigned char ch : delims)
+				delimiters[ch] = std::ctype_base::space;
+
+			return &delimiters[0];
+		}
+	};
+
 	template<class... Types>
 	class CSVParser
 	{
 		std::ifstream fin;
+		std::istringstream sin;
 
 		std::string delims;
 		size_t column;
@@ -22,9 +42,9 @@ namespace labCSVParser
 			CSVParser &pars;
 			std::tuple<Types...> t;
 			bool end;
-		public:
 
 			iterator(CSVParser &pars, const std::tuple<Types...>& t, bool end=false) : pars(pars), end(end), t(t) {};
+		public:
 			const std::tuple<Types...>& operator*() const 
 			{ 
 				return t; 
@@ -45,7 +65,9 @@ namespace labCSVParser
 
 			iterator& operator++()
 			{
-				end = !pars.getWord(t, t);
+				end = !pars.hasNext();
+				if (!end)
+					t = pars.getNext();
 				return *this;
 			}
 
@@ -65,8 +87,8 @@ namespace labCSVParser
 			{
 				column = N;
 				First temp;
-				fin >> temp;
-				std::get<N>(tuple) = temp;
+				sin >> temp;
+				std::get<0>(tuple) = First(temp);
 			}
 			catch (std::exception &e)
 			{
@@ -74,37 +96,54 @@ namespace labCSVParser
 			}
 		}
 
-		bool getWord(std::tuple<>& tuple, std::tuple<>& t)
+		std::string removeShieldedData(const std::string& line)
+		{
+			return line;
+		}
+
+		void prepareLine()
+		{
+			std::string line;
+			std::getline(fin, line);
+			line = removeShieldedData(line);
+			sin = std::istringstream(line);
+			sin.imbue(std::locale(std::locale(), new DelimsLocale(delims)));
+		}
+
+		template<size_t N>
+		bool getWord(std::tuple<>& t)
 		{
 			return false;
 		}
 
-		template<size_t N, class ...Types, class First>
-		bool getWord(std::tuple<Types...> &tuple, std::tuple<First>& t)
+		template<size_t N, class First>
+		bool getWord(std::tuple<First>& t)
 		{
-			if (fin.eof())
+			if (sin.eof())
 				return false;
 
-			readItem<N>(tuple);
-			row++;
+			readItem<N>(t);
 			return true;
-		};
+		}
 
-		template<size_t N=0, class...Types, class First, class... Rest>
-		bool getWord(std::tuple<Types...>& tuple, std::tuple<First, Rest...>& t)
+		template<size_t N=0, class First, class... Rest>
+		bool getWord(std::tuple<First, Rest...>& t)
 		{
-			if (fin.eof())
+			if (sin.eof())
 				return false;
-			readItem<N>(tuple);
-			return getWord<N + 1>(tuple, t._Get_rest());
-		};
+
+			readItem<N>(t);
+			return getWord<N+1>(t._Get_rest());
+		}
+
 	public:
-		CSVParser<Types...>(const std::string &fileName) : fin(fileName) {};
+		CSVParser<Types...>(const std::string &fileName, const std::string& delims = ",") : fin(fileName), delims(delims) {};
 
 		std::tuple<Types...> getNext()
 		{
 			std::tuple<Types...> t;
-			getWord(t, t);
+			prepareLine();
+ 			getWord(t);
 			return t;
 		}
 
@@ -112,7 +151,8 @@ namespace labCSVParser
 		{
 			std::tuple<Types...> t;
 			auto pos = fin.tellg();
-			bool result = getWord(t, t);
+			prepareLine();
+			bool result = getWord(t);
 			fin.seekg(pos);
 
 			return result;
@@ -123,8 +163,12 @@ namespace labCSVParser
 			row = 0;
 			fin.seekg(0);
 			std::tuple<Types...> t;
-			bool res = !getWord(t, t);
-			iterator it(*this, t, res);
+
+			bool res = hasNext();
+			if (res)
+				t = getNext();
+
+			iterator it(*this, t, !res);
 
 			return it;
 		}
